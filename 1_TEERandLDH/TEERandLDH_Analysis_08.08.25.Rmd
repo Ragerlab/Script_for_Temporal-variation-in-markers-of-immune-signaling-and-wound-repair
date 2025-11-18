@@ -1,0 +1,183 @@
+---
+title: "HBEC Acute vs Repeated Red Oak Exposure: TEER and LDH Analysis"
+author: "Elise Hickman"
+---
+
+# Set up workspace
+
+```{r message = FALSE, warning = FALSE}
+# Clear global environment
+rm(list=ls())
+
+# Load packages
+library(this.path) # for file path
+library(janitor) # for data cleaning
+library(openxlsx) # for writing out files
+library(tidyverse) # for data organization and manipulation
+library(patchwork) # for graphing
+library(ggpubr) # for normality testing QQ plot panel
+library(rstatix) # for statistical testing
+select <- dplyr::select
+
+# Redefine functions that are masked
+select <- dplyr::select
+rename <- dplyr::rename
+margin <- ggplot2::margin
+
+# Set theme
+theme_set(theme_bw())
+
+# Set working directory
+setwd(this.dir())
+```
+
+# Import data
+
+```{r} 
+teer <- read.xlsx("1_RawData/RawData_TEER.xlsx") %>%
+  mutate(Treatment = factor(Treatment, levels = c("Vehicle", "Red Oak")))
+ 
+ldh <- read.xlsx("1_RawData/RawData_LDH.xlsx") %>%
+  separate(Sample, into = c("Donor", "Treatment_Short", "Day_Original", NA), sep = "_") %>%
+  mutate(Treatment = recode(Treatment_Short, "Ctrl" = "Vehicle", "RO" = "Red Oak"))%>%
+  mutate(Treatment = factor(Treatment, levels = c("Vehicle", "Red Oak"))) %>%
+  mutate(Day = substr(Day_Original, 4, 5)) %>%
+  mutate(Day = paste("Day", Day, sep = " ")) %>%
+  mutate(Day = factor(Day, levels = c("Day 1", "Day 3", "Day 5", "Day 8", "Day 10", "Day 12")))
+```
+
+# TEER analysis
+
+Normality testing:
+```{r}
+shapiro.test(teer$TEER)
+```
+Histogram:
+```{r}
+hist(teer$TEER, breaks = 10)
+```
+
+Q-Q plot:
+```{r}
+# Plot points
+qqnorm(teer$TEER)
+
+# Add a reference line for theoretically normally distributed data
+qqline(teer$TEER)
+```
+
+
+Data seem relatively normally distributed, so we will proceed with a paired t-test. 
+
+```{r}
+teer %>%
+  t_test(TEER ~ Treatment, paired = TRUE) %>%
+  pull("p")
+```
+
+There are no significant differences in TEER between vehicle and red oak on Day 12. We can proceed to graph the results for inclusion in supplemental figures:
+```{r}
+# Get colors (used to generate lighter colors for fill)
+col2hex <- function(x, alpha = FALSE) {
+  args <- as.data.frame(t(col2rgb(x, alpha = alpha)))
+  args <- c(args, list(names = x, maxColorValue = 255))
+  do.call(rgb, args)
+}
+
+col2hex(c("darkorange1", "magenta3"))
+
+# Make graph
+set.seed(8016)
+
+teer_graph <- ggplot(data = teer, aes(x = Treatment, y = TEER, fill = Treatment)) +
+  stat_summary(aes(fill = Treatment), fun.data = mean_se, geom = "col", color = "black", width = 0.75) +
+  scale_fill_manual(values = c("#ffc489", "#ffa6ff")) +
+  stat_summary(data = teer, aes(x = Treatment, y = TEER), fun.data = mean_se, geom = "errorbar", width = 0.5) +
+  geom_jitter(data = teer, aes(x = Treatment, y = TEER, color = Treatment, shape = Donor), size = 3, width = 0.2, height = 0.2) +
+  scale_shape_manual(values = c(15, 16, 17, 18)) +
+  scale_color_manual(values = c("darkorange1", "magenta3")) +
+  labs(y = expression("\u03a9 x cm"^2), title = "TEER (Day 12)") +
+  ylim(0, 500) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 14, color = "black"),
+        axis.title.y = element_text(size = 14, color = "black"),
+        axis.text.y = element_text(size = 10, color = "black"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5)) 
+
+teer_graph
+```
+
+
+# LDH analysis
+
+Normality testing:
+```{r}
+shapiro.test(ldh$Percent_Toxicity)
+```
+Histogram:
+```{r}
+hist(ldh$Percent_Toxicity)
+```
+
+Q-Q plot:
+```{r}
+# Plot points
+qqnorm(ldh$Percent_Toxicity)
+
+# Add a reference line for theoretically normally distributed data
+qqline(ldh$Percent_Toxicity)
+```
+
+Data are non-normally distributed, so we'll proceed with Wilcoxon test between vehicle and red oak at each of the time points:
+```{r}
+ldh %>%
+  group_by(Day) %>%
+  wilcox_test(Percent_Toxicity ~ Treatment, paired = TRUE)
+```
+
+There are no significant differences in LDH between vehicle and red oak on any of the days. We can proceed to graph the results for inclusion in supplemental figures:
+
+
+Make graph:
+```{r}
+# Graph
+ldh_graph <- ggplot(data = ldh, aes(x = Day, y = Percent_Toxicity, group = Treatment)) +
+  stat_summary(aes(fill = Treatment), fun.data = mean_se, geom = "col", color = "black", position = position_dodge(0.75), width = 0.75) +
+  scale_fill_manual(values = c("#ffc489", "#ffa6ff")) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(0.75)) + 
+  geom_jitter(aes(color = Treatment, shape = Donor), position = position_jitterdodge(dodge.width = 0.75, jitter.width = 0.1), size = 3) + 
+  scale_shape_manual(values = c(15, 16, 17, 18), guide = NULL) +
+  scale_color_manual(values = c("darkorange1", "magenta3"), guide = NULL) +
+  geom_hline(yintercept = 100, linetype = "dashed") +
+  labs(y = "Percent Toxicity", title = "Lactate Dehydrogenase Assay") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 14, color = "black"),
+        axis.title.y = element_text(size = 14, color = "black"),
+        axis.text.y = element_text(size = 10, color = "black"),
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.position = c(0.8, 0.8),
+        legend.background = element_rect(colour = 'grey', fill = 'white', linetype='solid')) 
+
+ldh_graph
+```
+
+# Make final figure
+
+```{r}
+ldh_teer_fig <- ldh_graph + teer_graph +
+  plot_layout(widths = c(3, 1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(size = 18, face = "bold"))
+
+ldh_teer_fig
+```
+```{r}
+png("2_Figures/FigurePanel_LDH_TEER.png",
+    width = 9, height = 4.5, units = "in", res = 1200)
+ldh_teer_fig
+invisible(dev.off())
+```
+
